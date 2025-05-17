@@ -1,14 +1,8 @@
-use std::time::Duration;
+use std::{ffi::OsString, path::PathBuf, time::Duration};
 
 #[derive(serde::Deserialize)]
-struct Img {
-	img: String,
-	#[serde(default)]
-	args: Vec<String>,
-}
-#[derive(serde::Deserialize)]
 struct ConfigList {
-	images: Vec<Img>,
+	image_dir: PathBuf,
 	duration_secs: u64,
 }
 
@@ -17,7 +11,7 @@ fn main() {
 	args.next();
 
 	let ConfigList {
-		images,
+		image_dir,
 		duration_secs,
 	} = toml::from_str(
 		&std::fs::read_to_string(args.next().map(Into::into).unwrap_or_else(|| {
@@ -25,24 +19,28 @@ fn main() {
 			home_dir.push(".config/swloop.toml");
 			home_dir
 		}))
-		.unwrap_or_else(|why| panic!("unable to read file: {why}")),
+		.unwrap_or_else(|why| panic!("unable to read config file: {why}")),
 	)
 	.unwrap_or_else(|why| panic!("failed to parse config: {why}"));
-	let images: Vec<Vec<String>> = images
-		.into_iter()
-		.map(|Img { img, mut args }| {
-			args.insert(0, String::from("img"));
-			args.insert(1, img);
-			args
+	let images: Vec<[OsString; 2]> = image_dir
+		.read_dir()
+		.unwrap_or_else(|why| panic!("error reading image directory: {why}"))
+		.filter_map(|entry| {
+			if let Ok(entry) = entry {
+				if entry.path().is_file() {
+					return Some([OsString::from("img"), entry.path().as_os_str().to_owned()]);
+				}
+			}
+			None
 		})
 		.collect();
+
 	for args in images.iter().cycle() {
 		let mut child = std::process::Command::new("swww")
 			.args(args)
 			.stderr(std::process::Stdio::piped())
 			.spawn()
 			.unwrap_or_else(|e| panic!("unable to spawn: {e}"));
-		std::thread::sleep(Duration::from_secs(duration_secs));
 		let now = std::time::Instant::now();
 		let timeout = Duration::from_secs(5);
 		while now.elapsed() < timeout {
@@ -64,5 +62,6 @@ fn main() {
 		if let Err(why) = child.wait() {
 			panic!("waiting on child failed, when it should be killed: {why}");
 		}
+		std::thread::sleep(Duration::from_secs(duration_secs));
 	}
 }
