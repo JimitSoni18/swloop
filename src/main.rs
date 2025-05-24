@@ -1,28 +1,18 @@
-use std::{ffi::OsString, path::PathBuf, time::Duration};
+use std::{ffi::OsString, path::Path, time::Duration};
 
-#[derive(serde::Deserialize)]
-struct ConfigList {
-	image_dir: PathBuf,
-	duration_secs: u64,
-}
+const USAGE_MESSAGE: &str = "Usage: swloop [image_directory] [duration_in_seconds?]";
 
 fn main() {
 	let mut args = std::env::args();
 	args.next();
+	let image_dir = args.next().expect(USAGE_MESSAGE);
+	let duration_secs = args
+		.next()
+		.map(|d| d.parse::<u32>().expect(USAGE_MESSAGE))
+		.unwrap_or(600)
+		.max(5);
 
-	let ConfigList {
-		image_dir,
-		duration_secs,
-	} = toml::from_str(
-		&std::fs::read_to_string(args.next().map(Into::into).unwrap_or_else(|| {
-			let mut home_dir = std::env::home_dir().expect("unable to determine home directory");
-			home_dir.push(".config/swloop.toml");
-			home_dir
-		}))
-		.unwrap_or_else(|why| panic!("unable to read config file: {why}")),
-	)
-	.unwrap_or_else(|why| panic!("failed to parse config: {why}"));
-	let images: Vec<[OsString; 2]> = image_dir
+	let images: Vec<[OsString; 2]> = Path::new(&image_dir)
 		.read_dir()
 		.unwrap_or_else(|why| panic!("error reading image directory: {why}"))
 		.filter_map(|entry| {
@@ -34,6 +24,8 @@ fn main() {
 			None
 		})
 		.collect();
+
+    let duration_secs = duration_secs as u64;
 
 	for args in images.iter().cycle() {
 		let mut child = std::process::Command::new("swww")
